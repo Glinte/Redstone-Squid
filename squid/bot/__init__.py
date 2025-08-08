@@ -78,10 +78,16 @@ class RedstoneSquid(Bot):
         if prefix is None:
             logger.info("No prefix found in config, using default '!'")
             prefix = "!"
+
+        intents = discord.Intents.default()
+        # Message content is required for prefix commands and members for role checks
+        intents.message_content = True
+        intents.members = True
+
         super().__init__(
             command_prefix=commands.when_mentioned_or(prefix),
             owner_id=config.get("owner_id"),
-            intents=discord.Intents.all(),
+            intents=intents,
             description=description or None,
         )
 
