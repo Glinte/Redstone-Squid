@@ -115,7 +115,7 @@ class User(Base):
     ign: Mapped[str] = mapped_column(String, default=None)
     discord_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
     minecraft_uuid: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), default=None)
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=False), default=func.now())
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=func.now())
 
     build_creators: Mapped[list["BuildCreator"]] = relationship(
         back_populates="user", default_factory=list, lazy="raise_on_sql", repr=False
@@ -152,11 +152,9 @@ class Restriction(Base):
 
     __tablename__ = "restrictions"
     id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, init=False)
-    build_category: Mapped[BuildCategoryLiteral | None] = mapped_column(String)
-    name: Mapped[str] = mapped_column(
-        String, unique=True
-    )  # FIXME: Shouldn't be nullable, note that to make type checkers happy I made this Mapped[str] instead of Mapped[str | None], even though it is nullable in the database
-    type: Mapped[RestrictionTypeLiteral | None] = mapped_column(String)
+    build_category: Mapped[BuildCategoryLiteral] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    type: Mapped[RestrictionTypeLiteral] = mapped_column(String, nullable=False)
 
     build_restrictions: Mapped[list["BuildRestriction"]] = relationship(
         back_populates="restriction", default_factory=list, lazy="raise_on_sql", repr=False
@@ -190,10 +188,8 @@ class Type(Base):
 
     __tablename__ = "types"
     id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, init=False)
-    build_category: Mapped[BuildCategoryLiteral | None] = mapped_column(String)
-    name: Mapped[str] = mapped_column(
-        String, unique=True
-    )  # FIXME: This should be unique per build category  # FIXME: shouldn't be nullable
+    build_category: Mapped[BuildCategoryLiteral] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
 
     build_types: Mapped[list["BuildType"]] = relationship(
         back_populates="type", default_factory=list, lazy="raise_on_sql", repr=False
@@ -252,7 +248,7 @@ class Build(Base, kw_only=True):
     locked_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), default=None)
     ai_generated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     extra_info: Mapped[Info] = mapped_column(JSON, nullable=False, default_factory=dict)
-    submission_time: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=False), default=func.now())
+    submission_time: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), default=func.now())
     edited_time: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), default=func.now())
     is_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
@@ -461,9 +457,9 @@ class VerificationCode(Base):
     code: Mapped[str] = mapped_column(String, nullable=False)
     username: Mapped[str] = mapped_column(String, nullable=False, default="")
     valid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), nullable=False, default=func.now())
+    created: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=func.now())
     expires: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=False), nullable=False, default=func.now() + text("INTERVAL '10 minutes'")
+        TIMESTAMP(timezone=True), nullable=False, default=func.now() + text("INTERVAL '10 minutes'")
     )
 
 
