@@ -1,6 +1,7 @@
 # type: ignore
 """Magical stuff, don't worry about it."""
 
+import asyncio
 import re
 from typing import TYPE_CHECKING, Any, Self, override
 
@@ -17,17 +18,16 @@ if TYPE_CHECKING:
 
 
 class DynamicRemoveOwnRedstonerRoleButton[BotT: "squid.bot.RedstoneSquid", V: discord.ui.View](
-    discord.ui.DynamicItem[discord.ui.Button[V]], template=r"remove:role:redstoner:(\d+)"
+    discord.ui.DynamicItem[discord.ui.Button[V]], template=r"remove:role:redstoner"
 ):
     """A button that allows users to remove their own redstoner role."""
 
-    def __init__(self, user_id: int):
-        self.user_id = user_id
+    def __init__(self):
         super().__init__(
             discord.ui.Button(
                 label="I'm not a redstoner",
                 style=discord.ButtonStyle.red,
-                custom_id=f"remove:role:redstoner:{user_id}",
+                custom_id="remove:role:redstoner",
             )
         )
 
@@ -36,25 +36,32 @@ class DynamicRemoveOwnRedstonerRoleButton[BotT: "squid.bot.RedstoneSquid", V: di
     async def from_custom_id(  # pyright: ignore [reportIncompatibleMethodOverride]
         cls: type[Self], interaction: Interaction[BotT], item: Item[Any], match: re.Match[str], /
     ) -> Self:
-        user_id = int(match.group(1))
-        return cls(user_id)
+        return cls()
 
     @override
     async def callback(self, interaction: Interaction[BotT]) -> Any:  # pyright: ignore [reportIncompatibleMethodOverride]
         await interaction.response.defer()
-        if interaction.user.id != self.user_id:
-            return
 
         if interaction.guild is None or interaction.guild.id != interaction.client.owner_server_id:
             return
 
-        member = interaction.guild.get_member(self.user_id)
-        if member is None:
+        member = interaction.user
+        redstoner_role = interaction.guild.get_role(433670432420397060)
+        if redstoner_role is None or redstoner_role not in member.roles:
             return
 
-        redstoner_role = interaction.guild.get_role(433670432420397060)
-        if redstoner_role in member.roles:
-            await member.remove_roles(redstoner_role)
+        await member.remove_roles(redstoner_role)
+
+        owner = interaction.client.get_user(interaction.client.owner_id)
+        channel = interaction.client.get_channel(433643026204852224)
+        if owner and channel:
+            await channel.send(
+                f"{owner.mention}, {member.mention} has removed their own redstoner role.",
+                allowed_mentions=discord.AllowedMentions(roles=False, users=(owner, member), everyone=False),
+            )
+
+        await asyncio.sleep(30)
+        await member.add_roles(redstoner_role)
 
 
 class GiveRedstoner[BotT: "squid.bot.RedstoneSquid"](Cog):
@@ -97,7 +104,7 @@ class GiveRedstoner[BotT: "squid.bot.RedstoneSquid"](Cog):
         )
 
         view = discord.ui.View()
-        view.add_item(DynamicRemoveOwnRedstonerRoleButton(member.id))
+        view.add_item(DynamicRemoveOwnRedstonerRoleButton())
         await self.bot.get_channel(433643026204852224).send(
             f"Hi {member.mention}, you just got the {redstoner_role.mention} role because you received 15 upvotes in {orig_message_link}.",
             allowed_mentions=discord.AllowedMentions(roles=False, users=(member,), everyone=False),
