@@ -4,25 +4,42 @@ import asyncio
 import io
 import mimetypes
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast, override
 
 import discord
 from discord.utils import escape_markdown
-from sqlalchemy import insert, select
+from sqlalchemy import select
 
 import squid.bot.utils as bot_utils
 from squid.bot._types import GuildMessageable
 from squid.bot.voting.vote_session import BuildVoteSession
 from squid.db import DatabaseManager
-from squid.db.builds import Build
-from squid.db.schema import BuildLink, Message, Status
-from squid.db.utils import upload_to_catbox, utcnow
+from squid.db.builds import Build, TitleOptions
+from squid.db.schema import Message, Status
+from squid.db.utils import utcnow
 
 if TYPE_CHECKING:
     import squid.bot
 
 
-background_tasks: set[asyncio.Task[Any]] = set()
+@dataclass
+class BuildMessage:
+    """Container for a build message with embeds and attached files."""
+
+    content: str | None
+    embeds: list[discord.Embed]
+    files: list[discord.File]
+
+
+@dataclass
+class EmbedOptions:
+    """Configuration options for embed/message generation."""
+
+    title_options: TitleOptions | None = None
+    include_metadata: bool = True
+    include_description: bool = True
+    image_strategy: Literal["first", "all", "none"] = "first"
 
 
 class BuildHandler[BotT: "squid.bot.RedstoneSquid"]:
@@ -137,53 +154,62 @@ class BuildHandler[BotT: "squid.bot.RedstoneSquid"]:
 
         await asyncio.gather(*(_update_single_message(message) for message in messages))
 
-    async def _insert_video_preview(self, preview_url: str) -> None:
-        """Insert a video preview into the database."""
-        async with self.bot.db.async_session() as session:
-            stmt = insert(BuildLink).values(build_id=self.build.id, url=preview_url, media_type="image")
-            await session.execute(stmt)
-            await session.commit()
+    async def generate_message(self, options: EmbedOptions | None = None) -> BuildMessage:
+        """Generate a :class:`BuildMessage` for this build."""
 
-    async def generate_embed(self) -> discord.Embed:
-        """Generates an embed for the build."""
+        opts = options or EmbedOptions()
         build = self.build
-        em = bot_utils.info_embed(title=self.build.get_title(), description=await self.get_description())
 
-        fields = self.get_metadata_fields()
-        for key, val in fields.items():
-            em.add_field(name=key, value=escape_markdown(val), inline=True)
+        description = await self.get_description() if opts.include_description else None
+        em = bot_utils.info_embed(
+            title=build.format_title(opts.title_options), description=description
+        )
 
-        if build.image_urls:
-            for url in build.image_urls:
-                mimetype, _ = mimetypes.guess_type(url)
-                if mimetype is not None and mimetype.startswith("image"):
-                    em.set_image(url=url)
-                    break
-                else:
+        if opts.include_metadata:
+            fields = self.get_metadata_fields()
+            for key, val in fields.items():
+                em.add_field(name=key, value=escape_markdown(val), inline=True)
+
+        files: list[discord.File] = []
+
+        if opts.image_strategy != "none":
+            if build.image_urls:
+                for url in build.image_urls:
+                    mimetype, _ = mimetypes.guess_type(url)
+                    if mimetype is not None and mimetype.startswith("image"):
+                        em.set_image(url=url)
+                        break
                     preview = await bot_utils.get_website_preview(url)
-                    if isinstance(preview["image"], io.BytesIO):
-                        raise RuntimeError("Got a BytesIO object instead of a URL.")
-                    em.set_image(url=preview["image"])
-        elif build.video_urls:
-            for url in build.video_urls:
-                preview = await bot_utils.get_website_preview(url)
-                if image := preview["image"]:
-                    if isinstance(image, str):
+                    image = preview["image"]
+                    if isinstance(image, io.BytesIO):
+                        filename = "preview.png"
+                        files.append(discord.File(fp=image, filename=filename))
+                        em.set_image(url=f"attachment://{filename}")
+                    elif isinstance(image, str):
                         em.set_image(url=image)
-                    else:  # isinstance(image, io.BytesIO)
-                        preview_url = await upload_to_catbox(
-                            filename="video_preview.png", file=image, mimetype="image/png"
-                        )
-                        build.image_urls.append(preview_url)
-                        if build.id is not None:
-                            task = asyncio.create_task(self._insert_video_preview(preview_url))
-                            background_tasks.add(task)
-                            task.add_done_callback(background_tasks.discard)
-                        em.set_image(url=preview_url)
                     break
+            elif build.video_urls:
+                for url in build.video_urls:
+                    preview = await bot_utils.get_website_preview(url)
+                    image = preview["image"]
+                    if image:
+                        if isinstance(image, io.BytesIO):
+                            filename = "preview.png"
+                            files.append(discord.File(fp=image, filename=filename))
+                            em.set_image(url=f"attachment://{filename}")
+                        else:
+                            em.set_image(url=image)
+                        break
 
         em.set_footer(text=f"Submission ID: {build.id} • Last Update {utcnow()}")
-        return em
+        return BuildMessage(content=None, embeds=[em], files=files)
+
+    async def generate_embed(self, options: EmbedOptions | None = None) -> discord.Embed:
+        """Backward compatible wrapper returning only the first embed."""
+
+        msg = await self.generate_message(options)
+        return msg.embeds[0]
+
 
     async def get_description(self) -> str | None:  # type: ignore
         """Generates a description for the build, which includes component restrictions, version compatibility, and other information."""
