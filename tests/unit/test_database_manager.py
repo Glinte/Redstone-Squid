@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from squid.db import BuildTagsManager, DatabaseManager
-from squid.db.schema import Restriction, Version
+from squid.db.schema import Restriction, Type, Version
 
 
 @pytest.mark.unit
@@ -59,6 +59,27 @@ class TestDatabaseManager:
 
             restrictions = await mock_db_manager.build_tags.fetch_all_restrictions()
             assert restrictions == sample_restriction_data
+
+    async def test_fetch_all_types(
+        self, mock_db_manager: DatabaseManager, sample_type_data: list[Type]
+    ) -> None:
+        """Test fetching all types returns expected data."""
+        with patch.object(mock_db_manager, "async_session") as mock_session_maker:
+            mock_session = AsyncMock()
+            mock_session_maker.return_value.__aenter__.return_value = mock_session
+
+            mock_result = Mock()
+            mock_session.execute.return_value = mock_result
+
+            mock_scalars = Mock()
+            mock_result.scalars.return_value = mock_scalars
+
+            mock_scalars.all.return_value = sample_type_data
+
+            mock_db_manager.build_tags = BuildTagsManager(mock_session_maker)
+
+            types = await mock_db_manager.build_tags.fetch_all_types()
+            assert types == sample_type_data
 
     async def test_get_or_fetch_versions_list(
         self, mock_db_manager: DatabaseManager, sample_version_data: list[Version]

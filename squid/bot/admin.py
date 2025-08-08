@@ -14,6 +14,9 @@ from squid.db.build_tags import (
     AliasAlreadyAdded,
     AliasTakenByOther,
     RestrictionNotFound,
+    TypeAliasAlreadyAdded,
+    TypeAliasTakenByOther,
+    TypeNotFound,
 )
 from squid.db.builds import Build
 
@@ -104,6 +107,46 @@ class Admin[BotT: "squid.bot.RedstoneSquid"](commands.Cog):
         matches = process.extract(
             current,
             restriction_names,
+            limit=25,
+            score_cutoff=30,
+        )
+        return [app_commands.Choice(name=match[0], value=match[0]) for match in matches]
+
+    @commands.hybrid_command("add_type_alias")
+    @check_is_staff()
+    @check_is_owner_server()
+    async def add_type_alias(self, ctx: Context[BotT], type_: str, alias: str):
+        """Add an alias for a type."""
+        async with self.bot.get_running_message(ctx) as sent_message:
+            try:
+                await self.bot.db.build_tags.add_type_alias(type_, alias)
+            except TypeNotFound:
+                await sent_message.edit(embed=utils.error_embed("Error", f"No type named '{type_}'."))
+            except TypeAliasAlreadyAdded:
+                await sent_message.edit(embed=utils.info_embed("Already added", "Alias already on this type."))
+            except TypeAliasTakenByOther as e:
+                await sent_message.edit(
+                    embed=utils.error_embed(
+                        "Error",
+                        f"Alias in use by another type (ID: {e.other_id}).",
+                    )
+                )
+            else:
+                await sent_message.edit(embed=utils.info_embed("Success", "Alias added."))
+
+    @add_type_alias.autocomplete("type_")
+    async def type_autocomplete(
+        self, _interaction: discord.Interaction[BotT], current: str
+    ) -> list[app_commands.Choice[str]]:
+        """Provide autocomplete for type names."""
+        if not current:
+            return []
+
+        types = await self.bot.db.build_tags.fetch_all_types()
+        type_names = [t.name for t in types]
+        matches = process.extract(
+            current,
+            type_names,
             limit=25,
             score_cutoff=30,
         )
