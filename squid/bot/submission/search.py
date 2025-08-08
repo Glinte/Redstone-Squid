@@ -19,7 +19,7 @@ from squid.bot.submission.ui.components import DynamicBuildEditButton
 from squid.bot.submission.ui.views import BuildInfoView
 from squid.bot.utils import RunningMessage, check_is_owner_server, check_is_staff
 from squid.db.builds import Build, get_builds_by_filter, search_smallest_door_records
-from squid.db.schema import Restriction, RestrictionAlias, Status, Type
+from squid.db.schema import Restriction, RestrictionAlias, Status, Type, TypeAlias
 
 if TYPE_CHECKING:
     import squid.bot
@@ -101,6 +101,31 @@ class SearchCog[BotT: "squid.bot.RedstoneSquid"](Cog):
                 description += "\n".join([f"{a.restriction_id}: {a.alias} (alias)" for a in aliases])
                 await sent_message.edit(embed=utils.info_embed("Restrictions", description))
 
+    @commands.command("search_patterns")
+    @check_is_staff()
+    @check_is_owner_server()
+    async def search_patterns(self, ctx: Context[BotT], query: str | None):
+        """This runs a substring search on the pattern type names."""
+        async with RunningMessage(ctx) as sent_message:
+            async with self.bot.db.async_session() as session:
+                stmt = select(Type)
+                alias_stmt = select(TypeAlias)
+
+                if query:
+                    stmt = stmt.where(Type.name.ilike(f"%{query}%"))
+                    alias_stmt = alias_stmt.where(TypeAlias.alias.ilike(f"%{query}%"))
+
+                types_task = session.execute(stmt)
+                aliases_task = session.execute(alias_stmt)
+
+                types, aliases = await asyncio.gather(types_task, aliases_task)
+                types = types.scalars().all()
+                aliases = aliases.scalars().all()
+
+                description = "\n".join([f"{t.id}: {t.name}" for t in types])
+                description += "\n"
+                description += "\n".join([f"{a.type_id}: {a.alias} (alias)" for a in aliases])
+                await sent_message.edit(embed=utils.info_embed("Patterns", description))
     @commands.hybrid_command()
     async def list_patterns(self, ctx: Context[BotT]):
         """Lists all the available patterns."""
