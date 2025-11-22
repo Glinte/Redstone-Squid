@@ -180,6 +180,55 @@ class RedstoneSquid(Bot):
         """A helper function to create a BuildHandler with the bot instance."""
         return BuildHandler(self, build)
 
+    async def on_message(self, message: discord.Message, /) -> None:  # type: ignore[override]
+        """Handle messages for normal commands and mention fallbacks."""
+
+        if message.author.bot:
+            return
+
+        ctx = await self.get_context(message)
+        await self.invoke(ctx)
+
+        if ctx.command is not None:
+            return
+
+        if self.user is None:
+            return
+
+        mention_variants = {self.user.mention, f"<@!{self.user.id}>"}
+        content = message.content
+
+        if not any(content.startswith(mention) for mention in mention_variants):
+            return
+
+        for mention in mention_variants:
+            if content.startswith(mention):
+                content = content[len(mention) :]
+                break
+
+        query = content.strip()
+
+        if not query:
+            return
+
+        try:
+            build_id = int(query)
+        except ValueError:
+            search_command = self.get_command("search")
+            if search_command is None:
+                logger.warning("Search command not found for mention fallback.")
+                return
+
+            await ctx.invoke(search_command, query=query)
+            return
+
+        build_view_command = self.get_command("build view")
+        if build_view_command is None:
+            logger.warning("Build view command not found for mention fallback.")
+            return
+
+        await ctx.invoke(build_view_command, build_id=build_id)
+
 
 @contextmanager
 def setup_logging(dev_mode: bool = False):
