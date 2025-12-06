@@ -1201,19 +1201,19 @@ class Build:
         self, session: AsyncSession, restrictions: list[str]
     ) -> tuple[list[Restriction], UnknownRestrictions]:
         """Get Restriction objects and identify unknown restrictions."""
-        restrictions_titled = [r.title() for r in restrictions]
+        restrictions_cleaned = [r.strip().lower() for r in restrictions]
 
-        stmt = select(Restriction).where(Restriction.name.in_(restrictions_titled))
+        stmt = select(Restriction).where(func.lower(Restriction.name).in_(restrictions_cleaned))
         result = await session.execute(stmt)
         found_restrictions = result.scalars().all()
 
         # Identify unknown restrictions by type
         unknown_restrictions: UnknownRestrictions = {}
-        found_names = {r.name for r in found_restrictions}
+        found_names = {r.name.lower() for r in found_restrictions}
 
-        unknown_wiring = [r for r in self.wiring_placement_restrictions if r.title() not in found_names]
-        unknown_component = [r for r in self.component_restrictions if r.title() not in found_names]
-        unknown_misc = [r for r in self.miscellaneous_restrictions if r.title() not in found_names]
+        unknown_wiring = [r.strip() for r in self.wiring_placement_restrictions if r.strip().lower() not in found_names]
+        unknown_component = [r.strip() for r in self.component_restrictions if r.strip().lower() not in found_names]
+        unknown_misc = [r.strip() for r in self.miscellaneous_restrictions if r.strip().lower() not in found_names]
 
         if unknown_wiring:
             unknown_restrictions["wiring_placement_restrictions"] = unknown_wiring
@@ -1226,14 +1226,18 @@ class Build:
 
     async def _get_types(self, session: AsyncSession, type_names: list[str]) -> tuple[list[Type], list[str]]:
         """Get Type objects and identify unknown types."""
-        type_names_titled = [t.title() for t in type_names]
+        type_names_cleaned = [t.strip().lower() for t in type_names]
 
-        stmt = select(Type).where(Type.build_category == self.category).where(Type.name.in_(type_names_titled))
+        stmt = (
+            select(Type)
+            .where(Type.build_category == self.category)
+            .where(func.lower(Type.name).in_(type_names_cleaned))
+        )
         result = await session.execute(stmt)
         found_types = result.scalars().all()
 
-        found_names = {t.name for t in found_types}
-        unknown_types = [t for t in type_names if t.title() not in found_names]
+        found_names = {t.name.lower() for t in found_types}
+        unknown_types = [t.strip() for t in type_names if t.strip().lower() not in found_names]
 
         return list(found_types), unknown_types
 
