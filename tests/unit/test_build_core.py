@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from squid.db.builds import Build, JoinedBuildRecord
+from squid.db.builds import Build, JoinedBuildRecord, TitleOptions, TitlePart
 from squid.db.schema import BuildCategory, Door, RestrictionRecord, Status, VersionRecord
 
 
@@ -311,6 +311,19 @@ class TestBuildTitle:
         sample_build.door_orientation_type = None
         with pytest.raises(ValueError, match="Door orientation type"):
             sample_build.get_title()
+
+    def test_format_title_hide_restriction(self, sample_build: Build):
+        """Test hiding a component restriction from the title."""
+        sample_build.component_restrictions = ["Obsless", "Stickyless"]
+        opts = TitleOptions(hidden_restrictions={"Stickyless"})
+        title = sample_build.format_title(opts)
+        assert title == "Pending: Obsless 2x3 1-wide Door"
+
+    def test_format_title_include_subset(self, sample_build: Build):
+        """Test generating a title with only selected parts."""
+        opts = TitleOptions(include={TitlePart.COMPONENT_RESTRICTIONS, TitlePart.ORIENTATION})
+        title = sample_build.format_title(opts)
+        assert title == "No pistons Door"
 
 
 class TestBuildComparison:

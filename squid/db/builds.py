@@ -1,6 +1,7 @@
 """Submitting and retrieving submissions to/from the database"""
 
 import asyncio
+import enum
 import logging
 import os
 import re
@@ -12,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from functools import cached_property
 from importlib import resources
 from types import TracebackType
-from typing import Any, Callable, Final, Literal, Self, overload
+from typing import Any, Callable, Final, Literal, Self, overload, TypeVar, Generic
 
 import discord
 import vecs
@@ -88,7 +89,10 @@ class JoinedBuildRecord(BuildRecord):
     messages: MessageRecord | None  # Not actually all the associated messages, just the original message
 
 
-class FrozenField[T]:
+T = TypeVar("T")
+
+
+class FrozenField(Generic[T]):
     """A descriptor that makes an attribute immutable after it has been set."""
 
     __slots__ = ("_private_name",)
@@ -97,12 +101,12 @@ class FrozenField[T]:
         self._private_name = "__frozen_" + name
 
     @overload
-    def __get__(self, instance: None, owner: type[object]) -> Self: ...
+    def __get__(self, instance: None, owner: type[object]) -> "FrozenField[T]": ...
 
     @overload
     def __get__(self, instance: object, owner: type[object]) -> T: ...
 
-    def __get__(self, instance: object | None, owner: type[object] | None = None) -> T | Self:
+    def __get__(self, instance: object | None, owner: type[object] | None = None) -> T | "FrozenField[T]":
         if instance is None:
             return self
         value = getattr(instance, self._private_name)
@@ -736,66 +740,130 @@ class Build:
                         raise RuntimeError("The type is supposed to never be None, this is a bug in the database.")
                     bucket[row.type].append(row.name)
 
-    def get_title(self) -> str:
-        """Generates the official Redstone Squid defined title for the build."""
-        title = ""
+
+class TitlePart(enum.Enum):
+    """Individual components that can compose a build's title."""
+
+    STATUS = enum.auto()
+    AI_FLAG = enum.auto()
+    RECORD_CATEGORY = enum.auto()
+    MISC_RESTRICTIONS = enum.auto()
+    COMPONENT_RESTRICTIONS = enum.auto()
+    DIMENSIONS = enum.auto()
+    WIRING_RESTRICTIONS = enum.auto()
+    PATTERN = enum.auto()
+    ORIENTATION = enum.auto()
+
+
+@dataclass
+class TitleOptions:
+    """Options when generating a build title."""
+
+    include: set[TitlePart] = field(default_factory=lambda: set(TitlePart))
+    hidden_restrictions: set[str] = field(default_factory=set)
+
+    def normalized_hidden(self) -> set[str]:
+        """Return a lowercase set of hidden restriction strings."""
+        return {r.lower() for r in self.hidden_restrictions}
+
+    def format_title(self, options: TitleOptions | None = None) -> str:
+        """Generate a title for the build respecting the provided options."""
 
         if self.category != "Door":
             raise NotImplementedError("Only doors are supported for now.")
 
-        if self.submission_status == Status.PENDING:
-            title += "Pending: "
-        elif self.submission_status == Status.DENIED:
-            title += "Denied: "
-        if self.ai_generated:
-            title += "\N{ROBOT FACE}"
-        if self.record_category:
-            title += f"{self.record_category} "
+        opts = options or TitleOptions()
+        include = opts.include
+        hidden = opts.normalized_hidden()
 
-        # Special casing misc restrictions shaped like "0.3s" and "524 Blocks"
-        for restriction in self.extra_info.get("unknown_restrictions", {}).get("miscellaneous_restrictions", []):
-            if re.match(r"\d+\.\d+\s*s", restriction):
-                title += f"{restriction} "
-            elif re.match(r"\d+\s*[Bb]locks", restriction):
-                title += f"{restriction} "
+        parts: list[str] = []
 
-        # FIXME: This is included in the title for now to match people's expectations
-        for restriction in self.component_restrictions:
-            title += f"{restriction} "
-        for restriction in self.extra_info.get("unknown_restrictions", {}).get("component_restrictions", []):
-            title += f"*{restriction}* "
+        if TitlePart.STATUS in include:
+            if self.submission_status == Status.PENDING:
+                parts.append("Pending:")
+            elif self.submission_status == Status.DENIED:
+                parts.append("Denied:")
 
-        # Door dimensions
-        if self.door_width and self.door_height and self.door_depth and self.door_depth > 1:
-            title += f"{self.door_width}x{self.door_height}x{self.door_depth} "
-        elif self.door_width and self.door_height:
-            title += f"{self.door_width}x{self.door_height} "
-        elif self.door_width:
-            title += f"{self.door_width} Wide "
-        elif self.door_height:
-            title += f"{self.door_height} High "
+        prefix = ""
+        if TitlePart.AI_FLAG in include and self.ai_generated:
+            prefix += "\N{ROBOT FACE}"
+        if TitlePart.RECORD_CATEGORY in include and self.record_category:
+            prefix += f"{self.record_category}"
+        if prefix:
+            parts.append(prefix)
 
-        # Wiring Placement Restrictions
-        for restriction in self.wiring_placement_restrictions:
-            title += f"{restriction} "
+        if TitlePart.MISC_RESTRICTIONS in include:
+            for restriction in self.extra_info.get("unknown_restrictions", {}).get(
+                "miscellaneous_restrictions", []
+            ):
+                if restriction.lower() in hidden:
+                    continue
+                if re.match(r"\d+\.\d+\s*s", restriction) or re.match(
+                    r"\d+\s*[Bb]locks", restriction
+                ):
+                    parts.append(restriction)
 
-        for restriction in self.extra_info.get("unknown_restrictions", {}).get("wiring_placement_restrictions", []):
-            title += f"*{restriction}* "
+        if TitlePart.COMPONENT_RESTRICTIONS in include:
+            for restriction in self.component_restrictions:
+                if restriction.lower() in hidden:
+                    continue
+                parts.append(restriction)
+            for restriction in self.extra_info.get("unknown_restrictions", {}).get(
+                "component_restrictions", []
+            ):
+                if restriction.lower() in hidden:
+                    continue
+                parts.append(f"*{restriction}*")
 
-        # Pattern
-        for pattern in self.door_type:
-            if pattern != "Regular":
-                title += f"{pattern} "
+        if TitlePart.DIMENSIONS in include:
+            dim = ""
+            if (
+                self.door_width
+                and self.door_height
+                and self.door_depth
+                and self.door_depth > 1
+            ):
+                dim = f"{self.door_width}x{self.door_height}x{self.door_depth}"
+            elif self.door_width and self.door_height:
+                dim = f"{self.door_width}x{self.door_height}"
+            elif self.door_width:
+                dim = f"{self.door_width} Wide"
+            elif self.door_height:
+                dim = f"{self.door_height} High"
+            if dim:
+                parts.append(dim)
 
-        for pattern in self.extra_info.get("unknown_patterns", []):
-            title += f"*{pattern}* "
+        if TitlePart.WIRING_RESTRICTIONS in include:
+            for restriction in self.wiring_placement_restrictions:
+                if restriction.lower() in hidden:
+                    continue
+                parts.append(restriction)
+            for restriction in self.extra_info.get("unknown_restrictions", {}).get(
+                "wiring_placement_restrictions", []
+            ):
+                if restriction.lower() in hidden:
+                    continue
+                parts.append(f"*{restriction}*")
 
-        # Door type
-        if self.door_orientation_type is None:
-            raise ValueError("Door orientation type information (i.e. Door/Trapdoor/Skydoor) is missing.")
-        title += self.door_orientation_type
+        if TitlePart.PATTERN in include:
+            for pattern in self.door_type:
+                if pattern != "Regular":
+                    parts.append(pattern)
+            for pattern in self.extra_info.get("unknown_patterns", []):
+                parts.append(f"*{pattern}*")
 
-        return title
+        if TitlePart.ORIENTATION in include:
+            if self.door_orientation_type is None:
+                raise ValueError(
+                    "Door orientation type information (i.e. Door/Trapdoor/Skydoor) is missing."
+                )
+            parts.append(self.door_orientation_type)
+
+        return " ".join(parts)
+
+    def get_title(self) -> str:
+        """Generates the official Redstone Squid defined title for the build."""
+        return self.format_title()
 
     async def get_persisted_copy(self) -> "Build":
         """Get a persisted copy of the build."""
