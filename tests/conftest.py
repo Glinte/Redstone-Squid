@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from testcontainers.compose import DockerCompose
 
 from squid.db import DatabaseManager
-from squid.db.schema import BuildCategory, Restriction, RestrictionRecord, Version, VersionRecord
+from squid.db.schema import BuildCategory, Restriction, RestrictionRecord, Type, Version, VersionRecord
 
 
 @pytest.fixture
@@ -145,3 +145,15 @@ def sample_restriction_data() -> list[Restriction]:
     for i, restriction in enumerate(restrictions):
         restriction.id = i + 1
     return restrictions
+
+
+@pytest.fixture
+def sample_type_data() -> list[Type]:
+    """Sample type data for testing."""
+    types = [
+        Type(name="Full Lamp", build_category="Door"),
+        Type(name="Funnel", build_category="Door"),
+    ]
+    for i, type_ in enumerate(types):
+        type_.id = i + 1
+    return types

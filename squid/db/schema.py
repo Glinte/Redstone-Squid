@@ -201,6 +201,20 @@ class Type(Base):
     builds: AssociationProxy[list["Build"]] = association_proxy(
         "build_types", "build", default_factory=list, creator=lambda b: BuildType(build=b), repr=False
     )
+    aliases: Mapped[list["TypeAlias"]] = relationship(
+        back_populates="type", default_factory=list, lazy="selectin"
+    )
+
+
+class TypeAlias(Base):
+    """An alias for a type, allowing for alternative names."""
+
+    __tablename__ = "type_aliases"
+    type_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("types.id"), nullable=False)
+    alias: Mapped[str] = mapped_column(String, nullable=False, unique=True, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=func.now())
+
+    type: Mapped[Type] = relationship(back_populates="aliases", init=False, lazy="joined")
 
 
 class Message(Base):
@@ -643,6 +657,14 @@ class TypeRecord(TypedDict):
     id: int
     build_category: BuildCategory
     name: str
+
+
+class TypeAliasRecord(TypedDict):
+    """An alias for a type on a build."""
+
+    type_id: int
+    alias: str
+    created_at: str
 
 
 class RestrictionRecord(TypedDict):
