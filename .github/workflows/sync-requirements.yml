@@ -1,0 +1,44 @@
+name: Sync requirements from uv.lock
+
+permissions:
+  contents: write
+
+on:
+  push:
+    paths:
+      - uv.lock
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.6.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Export requirements
+        run: |
+          uv export --output-file requirements/base.txt --quiet
+          uv export --only-dev --output-file requirements/dev.txt --quiet
+
+      - name: Commit updated requirements
+        run: |
+          if git diff --quiet -- requirements/base.txt requirements/dev.txt; then
+            echo "No requirement updates needed."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add requirements/base.txt requirements/dev.txt
+          git commit -m "Sync requirements from uv.lock"
+          git push
